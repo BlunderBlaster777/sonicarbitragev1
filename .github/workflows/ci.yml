@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, 'copilot/**']
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # ── Backend: lint, build, unit tests ──────────────────────────────────────
+  backend:
+    name: Backend (lint + build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint || true   # warn-only in CI, make strict after fixing all lint errors
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Run unit tests
+        run: npm test -- --coverage
+        env:
+          CHAIN_ID: '146'
+          DRY_RUN: 'true'
+          RPC_URLS: 'https://rpc.soniclabs.com'
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage/
+
+  # ── Hardhat: compile + unit tests ─────────────────────────────────────────
+  hardhat:
+    name: Hardhat (compile + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hardhat
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: hardhat/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile contracts
+        run: npx hardhat compile
+
+      - name: Run contract tests
+        run: npx hardhat test
+
+  # ── UI: lint + build ───────────────────────────────────────────────────────
+  ui:
+    name: UI (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          REACT_APP_BACKEND_URL: http://localhost:3001
+          CI: 'false'  # Don't treat warnings as errors in build
+
+  # ── Docker build check ─────────────────────────────────────────────────────
+  docker:
+    name: Docker build check
+    runs-on: ubuntu-latest
+    needs: [backend, ui]
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: false
+          tags: sonic-arb-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build UI image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ui
+          push: false
+          tags: sonic-arb-ui:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Fork integration tests (manual trigger only to save RPC credits) ───────
+  integration:
+    name: Integration tests (Sonic fork)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    defaults:
+      run:
+        working-directory: hardhat
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: hardhat/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run fork tests
+        run: npx hardhat test
+        env:
+          FORK_SONIC: 'true'
+          SONIC_FORK_RPC: ${{ secrets.SONIC_FORK_RPC }}

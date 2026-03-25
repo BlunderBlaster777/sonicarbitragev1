@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build output
+dist/
+build/
+*/dist/
+*/build/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Coverage
+coverage/
+*/coverage/
+.nyc_output/
+
+# Hardhat
+cache/
+artifacts/
+hardhat/cache/
+hardhat/artifacts/
+typechain-types/
+
+# Docker
+.docker/
+
+# Temporary files
+tmp/
+temp/
+
+# TypeScript
+*.tsbuildinfo

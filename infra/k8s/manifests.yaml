@@ -1,0 +1,124 @@
+# ── Backend Deployment ────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arb-backend
+  labels:
+    app: arb-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: arb-backend
+  template:
+    metadata:
+      labels:
+        app: arb-backend
+    spec:
+      containers:
+        - name: backend
+          image: your-registry/sonic-arb-backend:latest
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - secretRef:
+                name: arb-secrets
+            - configMapRef:
+                name: arb-config
+          resources:
+            requests:
+              memory: '256Mi'
+              cpu: '250m'
+            limits:
+              memory: '512Mi'
+              cpu: '500m'
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: arb-backend
+spec:
+  selector:
+    app: arb-backend
+  ports:
+    - port: 3001
+      targetPort: 3001
+---
+# ── UI Deployment ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arb-ui
+  labels:
+    app: arb-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: arb-ui
+  template:
+    metadata:
+      labels:
+        app: arb-ui
+    spec:
+      containers:
+        - name: ui
+          image: your-registry/sonic-arb-ui:latest
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: arb-ui
+spec:
+  selector:
+    app: arb-ui
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# ── ConfigMap ─────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: arb-config
+data:
+  CHAIN_ID: '146'
+  HTTP_PORT: '3001'
+  WS_PORT: '3002'
+  METRICS_PORT: '9090'
+  DRY_RUN: 'true'
+  LOG_FORMAT: 'json'
+  LOG_LEVEL: 'info'
+  SCAN_INTERVAL_MS: '300'
+---
+# ── Secret (fill with real values) ───────────────────────────────────────────
+# kubectl create secret generic arb-secrets \
+#   --from-literal=RPC_URLS=https://rpc.soniclabs.com \
+#   --from-literal=PRIVATE_KEY=... \
+#   --from-literal=DB_URL=postgresql://... \
+#   --from-literal=REDIS_URL=redis://...
+apiVersion: v1
+kind: Secret
+metadata:
+  name: arb-secrets
+type: Opaque
+stringData:
+  RPC_URLS: 'https://rpc.soniclabs.com'
+  # PRIVATE_KEY: ''  # dev only — use KMS in production
+  DB_URL: 'postgresql://arbbot:password@postgres:5432/arbbot'
+  REDIS_URL: 'redis://redis:6379'
