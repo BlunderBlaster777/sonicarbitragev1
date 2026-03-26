@@ -92,8 +92,12 @@ async function main(): Promise<void> {
   let walletBalanceUsd = 0;
   const updateWalletBalance = async () => {
     try {
-      // TODO: replace with real USDC balance lookup
-      walletBalanceUsd = 10_000; // placeholder
+      const usdcBalance = await simulator.readBalance(config.tokens.USDC, signerAddr);
+      if (usdcBalance !== null) {
+        walletBalanceUsd = Number(usdcBalance) / 1e6; // USDC has 6 decimals
+      } else {
+        logger.warn('[main] Could not read USDC balance — keeping previous value');
+      }
       metrics.walletBalanceUsd.set(walletBalanceUsd);
       wsServer.broadcastBalance(walletBalanceUsd);
     } catch (err) {
@@ -130,6 +134,32 @@ async function main(): Promise<void> {
         await insertTrade(trade).catch((err) =>
           logger.warn({ err }, '[main] Failed to persist trade'),
         );
+      }
+
+      // ── Idle rebalance: hold USDC when no opportunities ─────────────────
+      if (opportunities.length === 0 && config.rebalanceToUsdc) {
+        try {
+          const wsBalance = await simulator.readBalance(config.tokens.WS, signerAddr);
+          if (wsBalance !== null && wsBalance > 0n) {
+            // Estimate USD value of WS holdings (rough: use 18 decimals)
+            // A proper price feed would be better, but this prevents dust swaps
+            const wsValueUsd = Number(wsBalance) / 1e18;
+            if (wsValueUsd >= config.minRebalanceUsd) {
+              logger.info(
+                { wsBalance: wsBalance.toString(), wsValueUsd },
+                '[main] No opportunities — rebalancing WS → USDC',
+              );
+              await executor.rebalanceToUsdc(
+                wsBalance,
+                'USDC/WS',
+                config.tokens.WS,
+                config.tokens.USDC,
+              );
+            }
+          }
+        } catch (err) {
+          logger.warn({ err }, '[main] Idle rebalance check failed');
+        }
       }
 
       wsServer.broadcastStatus({

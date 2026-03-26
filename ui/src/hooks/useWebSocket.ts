@@ -15,7 +15,7 @@ import type {
   WsMessage,
 } from '../lib/types';
 
-const BACKEND_URL = process.env['REACT_APP_BACKEND_URL'] ?? 'http://localhost:3001';
+const BACKEND_URL = import.meta.env['VITE_BACKEND_URL'] ?? 'http://localhost:3001';
 
 export interface UseWebSocketOptions {
   onOpportunity?: (opp: ArbOpportunity) => void;

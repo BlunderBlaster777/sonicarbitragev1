@@ -181,6 +181,102 @@ export class Executor {
     }
   }
 
+  /**
+   * Swap all non-USDC token holdings back to USDC when the bot is idle.
+   * Picks the DEX with the best quote for WS → USDC.
+   * Respects dryRun mode and logs the rebalance action.
+   */
+  async rebalanceToUsdc(
+    wsBalance: bigint,
+    pair: string,
+    tokenWs: string,
+    tokenUsdc: string,
+  ): Promise<void> {
+    const recipient = this.signer?.address ?? '0x0000000000000000000000000000000000000001';
+
+    // Get quotes from both DEXes for WS → USDC
+    const [shadowQuote, beetsQuote] = await Promise.allSettled([
+      this.shadow.quoteSwap('shadow', pair, wsBalance, tokenWs, tokenUsdc),
+      this.beets.quoteSwap('beets', pair, wsBalance, tokenWs, tokenUsdc),
+    ]);
+
+    const shadowOk = shadowQuote.status === 'fulfilled' ? shadowQuote.value : null;
+    const beetsOk = beetsQuote.status === 'fulfilled' ? beetsQuote.value : null;
+
+    // Pick the DEX that returns the most USDC
+    let bestDex: 'shadow' | 'beets';
+    let bestQuote: typeof shadowOk;
+
+    if (shadowOk && beetsOk) {
+      if (shadowOk.amountOut >= beetsOk.amountOut) {
+        bestDex = 'shadow';
+        bestQuote = shadowOk;
+      } else {
+        bestDex = 'beets';
+        bestQuote = beetsOk;
+      }
+    } else if (shadowOk) {
+      bestDex = 'shadow';
+      bestQuote = shadowOk;
+    } else if (beetsOk) {
+      bestDex = 'beets';
+      bestQuote = beetsOk;
+    } else {
+      logger.warn('[Executor] Rebalance failed — could not get quotes from either DEX');
+      return;
+    }
+
+    logger.info(
+      { dex: bestDex, wsBalance: wsBalance.toString(), expectedUsdc: bestQuote!.amountOut.toString() },
+      '[Executor] Rebalancing WS → USDC on %s',
+      bestDex,
+    );
+
+    const adapter = bestDex === 'shadow' ? this.shadow : this.beets;
+    const tx = await adapter.buildSwapTx(bestDex, pair, wsBalance, tokenWs, tokenUsdc, recipient);
+
+    // Simulate first
+    const simResult = await this.simulator.simulateTx(tx, recipient);
+    if (!simResult.success) {
+      logger.warn(
+        { reason: simResult.revertReason },
+        '[Executor] Rebalance simulation failed — keeping WS position',
+      );
+      return;
+    }
+
+    if (config.dryRun) {
+      logger.info(
+        { dex: bestDex, wsAmount: wsBalance.toString(), expectedUsdc: bestQuote!.amountOut.toString() },
+        '[Executor] DRY RUN — would rebalance WS → USDC on %s',
+        bestDex,
+      );
+      return;
+    }
+
+    if (!this.signer && !config.remoteSignerUrl) {
+      logger.warn('[Executor] No signer configured — cannot rebalance');
+      return;
+    }
+
+    try {
+      const feeData = await this.rpc.call((p) => p.getFeeData());
+      const nonce = await this.nonceManager.nextNonce();
+      const txHash = await this.signAndSend(tx, nonce, feeData);
+      logger.info({ txHash }, '[Executor] Rebalance tx broadcast: %s', txHash);
+
+      const receipt = await this.waitForConfirmation(txHash);
+      if (receipt && receipt.status === 1) {
+        logger.info({ txHash }, '[Executor] Rebalance confirmed — now holding USDC');
+      } else {
+        logger.error({ txHash }, '[Executor] Rebalance tx reverted on-chain');
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      logger.error({ err }, '[Executor] Rebalance broadcast error: %s', reason);
+    }
+  }
+
   // ── Private helpers ────────────────────────────────────────────────────────
 
   private resolveAdapters(opp: ArbOpportunity) {

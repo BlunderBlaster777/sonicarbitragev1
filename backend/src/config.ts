@@ -83,6 +83,12 @@ export const config = {
   maxDailyLossUsd: optionalNum('MAX_DAILY_LOSS_USD', 500),
   scanIntervalMs: optionalNum('SCAN_INTERVAL_MS', 300),
 
+  // ── Idle Rebalancing ─────────────────────────────────────────────────────
+  /** If true, swap non-USDC holdings back to USDC when no opportunities found */
+  rebalanceToUsdc: optionalBool('REBALANCE_TO_USDC', true),
+  /** Minimum non-USDC holding value (USD) to trigger a rebalance */
+  minRebalanceUsd: optionalNum('MIN_REBALANCE_USD', 1.0),
+
   // ── Safety ───────────────────────────────────────────────────────────────
   /** If true, run full pipeline but never broadcast transactions */
   dryRun: optionalBool('DRY_RUN', true),
