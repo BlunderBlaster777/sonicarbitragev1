@@ -5,16 +5,17 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 
+COPY index.html ./
 COPY public ./public
 COPY src ./src
-COPY tsconfig.json ./
+COPY tsconfig.json vite.config.ts ./
 
 RUN npm run build
 
 # ── Serve with nginx ──────────────────────────────────────────────────────────
 FROM nginx:1.25-alpine AS production
 
-COPY --from=builder /app/build /usr/share/nginx/html
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Config to support React Router (client-side routing)
 RUN echo 'server { \

@@ -122,7 +122,7 @@ export class Simulator {
   }
 
   /** Read on-chain ERC20 balance using eth_call. Returns null on error. */
-  private async readBalance(token: string, account: string): Promise<bigint | null> {
+  async readBalance(token: string, account: string): Promise<bigint | null> {
     return this.rpc.call(async (provider) => {
       try {
         const erc20 = new Contract(token, ERC20_ABI, provider);

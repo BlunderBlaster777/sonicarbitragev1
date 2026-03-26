@@ -24,13 +24,17 @@ import { Executor } from './executor';
 import { WsServer } from './wsServer';
 import { metrics, metricsRegistry } from './metrics';
 import { insertTrade } from './db';
+import { RebalanceResult } from './executor';
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   // 1. Validate config
   validateConfig();
-  logger.info({ config: { chainId: config.chainId, dryRun: config.dryRun } }, '[main] Starting Sonic Arb Bot');
+  logger.info(
+    { config: { chainId: config.chainId, dryRun: config.dryRun } },
+    '[main] Starting Sonic Arb Bot',
+  );
 
   // 2. Initialise modules
   const rpc = new RpcManager(config.rpcUrls);
@@ -92,8 +96,12 @@ async function main(): Promise<void> {
   let walletBalanceUsd = 0;
   const updateWalletBalance = async () => {
     try {
-      // TODO: replace with real USDC balance lookup
-      walletBalanceUsd = 10_000; // placeholder
+      const usdcBalance = await simulator.readBalance(config.tokens.USDC, signerAddr);
+      if (usdcBalance !== null) {
+        walletBalanceUsd = Number(usdcBalance) / 1e6; // USDC has 6 decimals
+      } else {
+        logger.warn('[main] Could not read USDC balance — keeping previous value');
+      }
       metrics.walletBalanceUsd.set(walletBalanceUsd);
       wsServer.broadcastBalance(walletBalanceUsd);
     } catch (err) {
@@ -130,6 +138,50 @@ async function main(): Promise<void> {
         await insertTrade(trade).catch((err) =>
           logger.warn({ err }, '[main] Failed to persist trade'),
         );
+      }
+
+      // ── Idle rebalance: hold USDC when no opportunities ─────────────────
+      if (opportunities.length === 0 && config.rebalanceToUsdc) {
+        try {
+          const wsBalance = await simulator.readBalance(config.tokens.WS, signerAddr);
+          if (wsBalance !== null && wsBalance > 0n) {
+            // Estimate USD value of WS holdings (rough: use 18 decimals)
+            // A proper price feed would be better, but this prevents dust swaps
+            const wsValueUsd = Number(wsBalance) / 1e18;
+            if (wsValueUsd >= config.minRebalanceUsd) {
+              logger.info(
+                { wsBalance: wsBalance.toString(), wsValueUsd },
+                '[main] No opportunities — rebalancing WS → USDC',
+              );
+              const rebalanceResult: RebalanceResult = await executor.rebalanceToUsdc(
+                wsBalance,
+                'USDC/WS',
+                config.tokens.WS,
+                config.tokens.USDC,
+              );
+              if (rebalanceResult.attempted) {
+                const status = rebalanceResult.confirmed
+                  ? 'confirmed'
+                  : rebalanceResult.dryRun
+                    ? 'dry_run'
+                    : 'failed';
+                metrics.rebalancesTotal.inc({ status });
+                wsServer.broadcastRebalance({
+                  tokenIn: config.tokens.WS,
+                  tokenOut: config.tokens.USDC,
+                  amountIn: rebalanceResult.amountIn ?? wsBalance.toString(),
+                  expectedOut: rebalanceResult.expectedUsdc ?? '0',
+                  dex: rebalanceResult.dex ?? 'unknown',
+                  dryRun: rebalanceResult.dryRun ?? config.dryRun,
+                });
+              } else if (rebalanceResult.failureReason) {
+                metrics.rebalancesTotal.inc({ status: 'failed' });
+              }
+            }
+          }
+        } catch (err) {
+          logger.warn({ err }, '[main] Idle rebalance check failed');
+        }
       }
 
       wsServer.broadcastStatus({
