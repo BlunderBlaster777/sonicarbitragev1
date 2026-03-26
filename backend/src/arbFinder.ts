@@ -172,10 +172,9 @@ export class ArbFinder {
         (gasPrice * BigInt(Math.round(config.maxGasPriceMultiplier * 100))) / 100n;
       const effectiveGasPrice = gasPrice < maxGasPrice ? gasPrice : maxGasPrice;
       const gasCostWei = ESTIMATED_GAS_UNITS * effectiveGasPrice;
-      // Convert from S (native Sonic token, 18 decimals) to USD
-      // TODO: replace 0.5 with a live S/USD price feed
-      const S_PRICE_USD = 0.5;
-      return Number(gasCostWei) / 1e18 * S_PRICE_USD;
+      // Convert from S (native Sonic token, 18 decimals) to USD using configured price.
+      // Set S_PRICE_USD in .env to the current S/USD rate (check sonicscan.org or a DEX).
+      return (Number(gasCostWei) / 1e18) * config.sPriceUsd;
     } catch {
       // Fallback estimate if RPC fails
       return 0.5;

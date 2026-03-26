@@ -28,6 +28,10 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  *   and consider using flash swaps instead of pre-approved tokens.
  */
 contract AtomicArb is Ownable {
+    event ArbExecuted(address indexed profitToken, uint256 profit);
+    event Withdrawn(address indexed token, uint256 amount, address indexed to);
+    event WithdrawnNative(uint256 amount, address indexed to);
+
     constructor() Ownable(msg.sender) {}
 
     /**
@@ -63,6 +67,7 @@ contract AtomicArb is Ownable {
             balanceAfter >= balanceBefore + minProfit,
             "AtomicArb: insufficient profit"
         );
+        emit ArbExecuted(profitToken, balanceAfter - balanceBefore);
     }
 
     /**
@@ -71,13 +76,16 @@ contract AtomicArb is Ownable {
      */
     function withdraw(address token, uint256 amount, address to) external onlyOwner {
         IERC20(token).transfer(to, amount);
+        emit Withdrawn(token, amount, to);
     }
 
     /**
      * @notice Withdraw native token (owner only).
      */
     function withdrawNative(address payable to) external onlyOwner {
-        to.transfer(address(this).balance);
+        uint256 amount = address(this).balance;
+        to.transfer(amount);
+        emit WithdrawnNative(amount, to);
     }
 
     receive() external payable {}

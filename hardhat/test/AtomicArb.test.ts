@@ -1,47 +1,35 @@
 /**
  * test/AtomicArb.test.ts — Unit + integration tests for AtomicArb contract.
  *
- * Unit tests use a mock ERC20 and mock swap targets.
+ * Unit tests use a MockERC20 token to verify profit checks.
  * Integration tests (FORK_SONIC=true) use actual Sonic mainnet pools.
  */
 
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import type { AtomicArb } from '../typechain-types';
-
-// ── Mock ERC20 helper ─────────────────────────────────────────────────────────
-
-async function deployMockERC20(name: string, symbol: string, supply: bigint) {
-  // Deploy a simple ERC20 for testing
-  const ERC20 = await ethers.getContractFactory('MockERC20');
-  const token = await ERC20.deploy(name, symbol, supply);
-  return token;
-}
-
-// ── Mock swap target ──────────────────────────────────────────────────────────
-
-/**
- * A minimal "swap" contract that simply transfers tokens.
- * In real tests, this would call into an actual DEX pool.
- */
-async function deployMockSwap(inputToken: string, outputToken: string, rate: bigint) {
-  const MockSwap = await ethers.getContractFactory('MockSwap');
-  const swap = await MockSwap.deploy(inputToken, outputToken, rate);
-  return swap;
-}
+import type { MockERC20 } from '../typechain-types';
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('AtomicArb', () => {
   let atomicArb: AtomicArb;
+  let token: MockERC20;
   let owner: Awaited<ReturnType<typeof ethers.getSigner>>;
   let other: Awaited<ReturnType<typeof ethers.getSigner>>;
 
+  const INITIAL_SUPPLY = ethers.parseUnits('10000', 6); // 10,000 USDC (6 decimals)
+
   beforeEach(async () => {
     [owner, other] = await ethers.getSigners();
+
     const AtomicArbFactory = await ethers.getContractFactory('AtomicArb');
     atomicArb = (await AtomicArbFactory.deploy()) as AtomicArb;
     await atomicArb.waitForDeployment();
+
+    const MockERC20Factory = await ethers.getContractFactory('MockERC20');
+    token = (await MockERC20Factory.deploy('Mock USDC', 'USDC', INITIAL_SUPPLY, 6)) as MockERC20;
+    await token.waitForDeployment();
   });
 
   it('deploys correctly', async () => {
@@ -58,11 +46,46 @@ describe('AtomicArb', () => {
   });
 
   it('reverts when profit is insufficient', async () => {
-    // Deploy a MockERC20 — the "profit" token
-    // We need MockERC20 and MockSwap contracts for full integration test
-    // Skipping if typechain types are not available
-    // This test is a placeholder for when MockERC20/MockSwap are compiled
-    expect(true).to.be.true; // placeholder
+    const arbAddress = await atomicArb.getAddress();
+    const tokenAddress = await token.getAddress();
+
+    // Seed the contract with some tokens (simulates pre-approved balance)
+    await token.transfer(arbAddress, ethers.parseUnits('100', 6));
+
+    // Call executeArb with no-op swap targets (address(1) with empty calldata)
+    // The contract balance won't increase, so requiring any minProfit > 0 should revert.
+    const noopTarget = '0x0000000000000000000000000000000000000001';
+    await expect(
+      atomicArb.executeArb(noopTarget, '0x', noopTarget, '0x', tokenAddress, ethers.parseUnits('1', 6)),
+    ).to.be.revertedWith('AtomicArb: insufficient profit');
+  });
+
+  it('succeeds when profit requirement is zero', async () => {
+    const arbAddress = await atomicArb.getAddress();
+    const tokenAddress = await token.getAddress();
+
+    // Seed the contract with tokens
+    await token.transfer(arbAddress, ethers.parseUnits('100', 6));
+
+    // With minProfit=0, executeArb should succeed even with no-op swaps
+    const noopTarget = '0x0000000000000000000000000000000000000001';
+    await expect(
+      atomicArb.executeArb(noopTarget, '0x', noopTarget, '0x', tokenAddress, 0n),
+    ).to.emit(atomicArb, 'ArbExecuted').withArgs(tokenAddress, 0n);
+  });
+
+  it('emits Withdrawn event on token withdrawal', async () => {
+    const arbAddress = await atomicArb.getAddress();
+    const tokenAddress = await token.getAddress();
+    const withdrawAmount = ethers.parseUnits('50', 6);
+
+    await token.transfer(arbAddress, withdrawAmount);
+
+    await expect(
+      atomicArb.withdraw(tokenAddress, withdrawAmount, owner.address),
+    )
+      .to.emit(atomicArb, 'Withdrawn')
+      .withArgs(tokenAddress, withdrawAmount, owner.address);
   });
 });
 
