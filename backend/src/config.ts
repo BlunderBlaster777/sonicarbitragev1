@@ -82,6 +82,13 @@ export const config = {
   maxGasPriceMultiplier: optionalNum('MAX_GAS_PRICE_MULTIPLIER', 2.0),
   maxDailyLossUsd: optionalNum('MAX_DAILY_LOSS_USD', 500),
   scanIntervalMs: optionalNum('SCAN_INTERVAL_MS', 300),
+  /**
+   * Approximate USD price of the native Sonic token (S) used for gas cost
+   * estimation. Check current price at https://sonicscan.org or a DEX.
+   * This does NOT need to be exact — a rough value is sufficient.
+   * TODO: replace with a live Chainlink oracle feed for production accuracy.
+   */
+  sPriceUsd: optionalNum('S_PRICE_USD', 0.5),
 
   // ── Idle Rebalancing ─────────────────────────────────────────────────────
   /** If true, swap non-USDC holdings back to USDC when no opportunities found */

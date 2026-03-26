@@ -80,6 +80,7 @@ jest.mock('../src/config', () => ({
       WS: '0xWS',
       WETH: '0xWETH',
     },
+    sPriceUsd: 0.5,
     rpcUrls: ['https://rpc.soniclabs.com'],
   },
 }));

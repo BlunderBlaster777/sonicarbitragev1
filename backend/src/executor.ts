@@ -341,13 +341,14 @@ export class Executor {
   private async broadcastAtomic(tx1: TxData, tx2: TxData, opp: ArbOpportunity): Promise<string> {
     if (!ATOMIC_HELPER_ADDRESS) throw new Error('No atomic helper address');
     const iface = new (await import('ethers')).Interface([
-      'function executeArb(address target1, bytes calldata data1, address target2, bytes calldata data2, uint256 minProfit) external',
+      'function executeArb(address target1, bytes calldata data1, address target2, bytes calldata data2, address profitToken, uint256 minProfit) external',
     ]);
     const data = iface.encodeFunctionData('executeArb', [
       tx1.to,
       tx1.data,
       tx2.to,
       tx2.data,
+      opp.buyQuote.tokenIn, // profitToken = round-trip base token (USDC)
       opp.grossProfit / 2n,
     ]);
     const atomicTx: TxData = { to: ATOMIC_HELPER_ADDRESS, data, value: 0n };

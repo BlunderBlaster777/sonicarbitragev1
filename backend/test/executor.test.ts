@@ -1,12 +1,10 @@
 /**
- * test/executor.test.ts — Unit tests for Executor.rebalanceToUsdc.
+ * test/executor.test.ts — Unit tests for Executor.
  *
- * Verifies the idle "hold USDC" behaviour:
- *   - When both DEX quotes succeed, picks the best one.
- *   - When only one DEX quote succeeds, uses it.
- *   - When no quotes succeed, returns attempted=false.
- *   - When simulation fails, returns attempted=false.
- *   - In dry-run mode, returns attempted=true, confirmed=false, dryRun=true.
+ * Covers:
+ *   - rebalanceToUsdc: idle "hold USDC" behaviour (DEX selection, fallbacks,
+ *     failure modes, dry-run mode).
+ *   - execute: arbitrage execution (dry-run, simulation failure, no signer).
  */
 
 import { Executor } from '../src/executor';
@@ -15,7 +13,7 @@ import type { BeetsAdapter } from '../src/poolAdapters/BeetsAdapter';
 import type { RpcManager } from '../src/rpcManager';
 import type { Simulator } from '../src/simulator';
 import type { NonceManager } from '../src/nonceManager';
-import type { Quote } from '../src/types';
+import type { ArbOpportunity, Quote } from '../src/types';
 
 // ── Mock config (dry-run by default) ─────────────────────────────────────────
 
@@ -31,6 +29,7 @@ jest.mock('../src/config', () => ({
     maxGasPriceMultiplier: 2.0,
     maxDailyLossUsd: 500,
     scanIntervalMs: 300,
+    sPriceUsd: 0.5,
     rebalanceToUsdc: true,
     minRebalanceUsd: 1.0,
     mevRelayUrl: undefined,
@@ -192,5 +191,107 @@ describe('Executor.rebalanceToUsdc', () => {
     expect(result.attempted).toBe(false);
     expect(result.confirmed).toBe(false);
     expect(result.failureReason).toBeDefined();
+  });
+});
+
+// ── Executor.execute() tests ───────────────────────────────────────────────────
+
+function makeArbOpportunity(): ArbOpportunity {
+  const buyQuote: Quote = {
+    dex: 'shadow',
+    pair: PAIR,
+    tokenIn: USDC_ADDRESS,
+    tokenOut: WS_ADDRESS,
+    amountIn: 1_000_000n,
+    amountOut: 2_000_000_000_000_000_000n,
+    amountOutMin: 1_980_000_000_000_000_000n,
+    feeAmount: 300n,
+    priceImpact: 0.001,
+  };
+  const sellQuote: Quote = {
+    dex: 'beets',
+    pair: PAIR,
+    tokenIn: WS_ADDRESS,
+    tokenOut: USDC_ADDRESS,
+    amountIn: 2_000_000_000_000_000_000n,
+    amountOut: 1_050_000n,
+    amountOutMin: 1_039_500n,
+    feeAmount: 200n,
+    priceImpact: 0.001,
+  };
+  return {
+    id: 'test-opp-001',
+    pair: PAIR,
+    direction: 'shadow_to_beets',
+    buyDex: 'shadow',
+    sellDex: 'beets',
+    amountIn: 1_000_000n,
+    midAmount: 2_000_000_000_000_000_000n,
+    amountOut: 1_050_000n,
+    grossProfit: 50_000n,
+    gasCostUsd: 0.05,
+    netProfitUsd: 0.45,
+    buyQuote,
+    sellQuote,
+    detectedAt: Date.now(),
+  };
+}
+
+function makeSimulatorForArb(success: boolean): Partial<Simulator> {
+  return {
+    simulateArb: jest.fn().mockResolvedValue(
+      success
+        ? { success: true, simulatedOutput: 1_050_000n, gasUsed: 350_000n }
+        : { success: false, revertReason: 'simulation failed' },
+    ),
+    simulateTx: jest.fn().mockResolvedValue({ success: true, gasUsed: 100_000n }),
+    readBalance: jest.fn().mockResolvedValue(null),
+  };
+}
+
+describe('Executor.execute', () => {
+  test('dry-run: returns simulated_only status without broadcasting', async () => {
+    const shadow = makeShadowAdapter(1_100_000n);
+    const beets = makeBeetsAdapter(1_000_000n);
+    const simulator = makeSimulatorForArb(true);
+    const executor = makeExecutor(shadow, beets, simulator);
+
+    const opp = makeArbOpportunity();
+    const result = await executor.execute(opp);
+
+    expect(result.status).toBe('simulated_only');
+    expect(result.dryRun).toBe(true);
+    expect(result.txHash).toBeUndefined();
+    expect(result.id).toBe(opp.id);
+  });
+
+  test('returns failed status when simulation fails', async () => {
+    const shadow = makeShadowAdapter(1_100_000n);
+    const beets = makeBeetsAdapter(1_000_000n);
+    const simulator = makeSimulatorForArb(false);
+    const executor = makeExecutor(shadow, beets, simulator);
+
+    const opp = makeArbOpportunity();
+    const result = await executor.execute(opp);
+
+    expect(result.status).toBe('failed');
+    expect(result.failureReason).toBeDefined();
+    expect(result.txHash).toBeUndefined();
+  });
+
+  test('preserves opportunity metadata in trade record', async () => {
+    const shadow = makeShadowAdapter(1_100_000n);
+    const beets = makeBeetsAdapter(1_000_000n);
+    const simulator = makeSimulatorForArb(true);
+    const executor = makeExecutor(shadow, beets, simulator);
+
+    const opp = makeArbOpportunity();
+    const result = await executor.execute(opp);
+
+    expect(result.pair).toBe(opp.pair);
+    expect(result.direction).toBe(opp.direction);
+    expect(result.netProfitUsd).toBe(opp.netProfitUsd);
+    expect(result.amountIn).toBe(opp.amountIn.toString());
+    expect(result.amountOut).toBe(opp.amountOut.toString());
   });
 });

@@ -20,7 +20,7 @@
  *   Add new pool IDs to POOL_MAP; override getPoolType() if needed.
  */
 
-import { Contract, AbiCoder } from 'ethers';
+import { Contract } from 'ethers';
 import { config } from '../config';
 import { logger } from '../logger';
 import type { PoolAdapter, PoolState, Quote, TxData } from '../types';
@@ -210,19 +210,12 @@ export class BeetsAdapter implements PoolAdapter {
     const deadline = Math.floor(Date.now() / 1000) + 300;
 
     const iface = new (await import('ethers')).Interface(VAULT_ABI);
-    const singleSwap = [
-      poolId,
-      SWAP_KIND_GIVEN_IN,
-      tokenIn,
-      tokenOut,
-      amountIn,
-      AbiCoder.defaultAbiCoder().encode([], []),
-    ];
+    const singleSwap = [poolId, SWAP_KIND_GIVEN_IN, tokenIn, tokenOut, amountIn, '0x'];
     const funds = [
-      recipient,   // sender
-      false,       // fromInternalBalance
-      recipient,   // recipient
-      false,       // toInternalBalance
+      recipient, // sender
+      false, // fromInternalBalance
+      recipient, // recipient
+      false, // toInternalBalance
     ];
 
     const data = iface.encodeFunctionData('swap', [
