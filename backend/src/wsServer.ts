@@ -87,6 +87,22 @@ export class WsServer {
     this.io.emit('balance', msg);
   }
 
+  broadcastRebalance(event: {
+    tokenIn: string;
+    tokenOut: string;
+    amountIn: string;
+    expectedOut: string;
+    dex: string;
+    dryRun: boolean;
+  }): void {
+    const msg: WsMessage<typeof event> = {
+      type: 'rebalance',
+      payload: event,
+      timestamp: Date.now(),
+    };
+    this.io.emit('rebalance', msg);
+  }
+
   // ── Incoming event handlers ────────────────────────────────────────────────
 
   private setupHandlers(): void {

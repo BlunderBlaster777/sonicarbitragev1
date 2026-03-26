@@ -146,6 +146,7 @@ export type WsMessageType =
   | 'balance'
   | 'config_update'
   | 'circuit_breaker'
+  | 'rebalance'
   | 'error';
 
 export interface WsMessage<T = unknown> {

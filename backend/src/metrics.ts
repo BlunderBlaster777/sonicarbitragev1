@@ -67,4 +67,11 @@ export const metrics = {
     labelNames: ['url'],
     registers: [metricsRegistry],
   }),
+
+  rebalancesTotal: new Counter({
+    name: 'arb_rebalances_total',
+    help: 'Total number of idle rebalance swaps (non-USDC → USDC)',
+    labelNames: ['status'],
+    registers: [metricsRegistry],
+  }),
 };

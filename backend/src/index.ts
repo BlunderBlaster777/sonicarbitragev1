@@ -24,13 +24,17 @@ import { Executor } from './executor';
 import { WsServer } from './wsServer';
 import { metrics, metricsRegistry } from './metrics';
 import { insertTrade } from './db';
+import { RebalanceResult } from './executor';
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   // 1. Validate config
   validateConfig();
-  logger.info({ config: { chainId: config.chainId, dryRun: config.dryRun } }, '[main] Starting Sonic Arb Bot');
+  logger.info(
+    { config: { chainId: config.chainId, dryRun: config.dryRun } },
+    '[main] Starting Sonic Arb Bot',
+  );
 
   // 2. Initialise modules
   const rpc = new RpcManager(config.rpcUrls);
@@ -149,12 +153,30 @@ async function main(): Promise<void> {
                 { wsBalance: wsBalance.toString(), wsValueUsd },
                 '[main] No opportunities — rebalancing WS → USDC',
               );
-              await executor.rebalanceToUsdc(
+              const rebalanceResult: RebalanceResult = await executor.rebalanceToUsdc(
                 wsBalance,
                 'USDC/WS',
                 config.tokens.WS,
                 config.tokens.USDC,
               );
+              if (rebalanceResult.attempted) {
+                const status = rebalanceResult.confirmed
+                  ? 'confirmed'
+                  : rebalanceResult.dryRun
+                    ? 'dry_run'
+                    : 'failed';
+                metrics.rebalancesTotal.inc({ status });
+                wsServer.broadcastRebalance({
+                  tokenIn: config.tokens.WS,
+                  tokenOut: config.tokens.USDC,
+                  amountIn: rebalanceResult.amountIn ?? wsBalance.toString(),
+                  expectedOut: rebalanceResult.expectedUsdc ?? '0',
+                  dex: rebalanceResult.dex ?? 'unknown',
+                  dryRun: rebalanceResult.dryRun ?? config.dryRun,
+                });
+              } else if (rebalanceResult.failureReason) {
+                metrics.rebalancesTotal.inc({ status: 'failed' });
+              }
             }
           }
         } catch (err) {
